@@ -41,13 +41,20 @@ export class MyDefinitionProvider implements DefinitionProvider {
       let pos = 0;
       // 对整个文档进行遍历, 文档中的每一行文本逐一和sourceStr匹配。
       // 跳转条件：行文本是符合caseReg规则的文本mateStr, mateStr再和sourceStr配对成功, 跳转到mateStr在文档中所处的位置。
+      let flagStr = "";
       while (pos <= document.lineCount) {
         const lineItem = document.lineAt(pos++);
         const lineItemText = lineItem.text;
-        const caseReg = /^\s*.*[case]\s*['|"](\w+[ColumnList])['|"]\s*[:]\s*.*$/g;
+        if (lineItemText.includes("getDefaultTableColumnList")) {
+          flagStr = "ColumnList";
+        } else if (lineItemText.includes("getTableRenderList")) {
+          flagStr = "RenderList";
+        }
+        const caseReg =
+          /^\s*.*[case]\s*['|"](\w+[ColumnList])['|"]\s*[:]\s*.*$/g;
         const mateStr =
           caseReg.test(lineItemText) && lineItemText.replace(caseReg, "$1");
-        if (mateStr && mateStr === sourceStr) {
+        if (mateStr && sourceStr.includes(flagStr)) {
           console.log("mg-helper 跳转成功~");
           return new Location(
             document.uri,
