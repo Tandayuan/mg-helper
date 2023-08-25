@@ -4,12 +4,12 @@
 
 ## Features
 
-+ [v1.0.0] F12/Ctrl+左键快捷键跳转到列定制编写行；
++ [v0.0.1] F12/Ctrl+左键快捷键跳转到列定制编写行；
 
   ![mg-helper__v1.0.0.gif](images/README/mg-helper__v1.0.0.gif)
 
 ## Release Notes
 
-### v1.0.0
+### v0.0.1
 
 F12/Ctrl+左键快捷键跳转到列定制编写行；
