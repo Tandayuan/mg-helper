@@ -14,7 +14,7 @@
     "onLanguage:javascript",
     "onLanguage:vue"
   ],
-  "icon": "./images/icons/404.png",
+  "icon": "./images/icons/mgLogo.jpg",
   "repository": {
     "type": "git",
     "url": "https://github.com/Tandayuan/mg-helper"
