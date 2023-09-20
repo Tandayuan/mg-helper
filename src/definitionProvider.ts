@@ -25,25 +25,48 @@ export class MyDefinitionProvider implements DefinitionProvider {
   ): ProviderResult<Definition | LocationLink[]> {
     const lineText = document.lineAt(position.line);
     const text = lineText.text;
+    const sourceStrLineNumber = lineText.lineNumber;
     // 按下F12或者ctrl+左键后可以获取当前鼠标光标位置行索引position.character，基于位置分别向前和向后遍历截取积累文本，遇到黑名单列表blackList中的元素停止遍历；
     // 返回最终积累的文本mateText后和reg正则表达式匹配成功表示正确选中文本sourceStr。
     const reg = /^\w+[ColumnList|RenderList]$/g;
-    let mateText = "";
-    const blackList = ['"', "'", ":", " "];
-    let pos = position.character;
-    let pt = text.charAt(pos);
-    while (!blackList.includes(pt) && pos < text.length) {
-      mateText += pt;
-      pt = text.charAt(++pos);
+    const fieldReg = /^[^\S\r\n\w]+field:\s*['|"](\w*)['|"].*$/g;
+    const renderReg = /^[^\S\r\n\w]+(\w*):\s*[{].*$/g;
+    let sourceStr: string = "";
+    let fieldText = "";
+    let isFieldSourceStr = false;
+    if (fieldReg.test(text)) {
+      fieldText = text.replace(fieldReg, "$1");
+    } else if (renderReg.test(text)) {
+      fieldText = text.replace(renderReg, "$1");
     }
-    let bos = position.character - 1;
-    let bt = text.charAt(bos);
-    while (!blackList.includes(bt) && bos >= 0) {
-      mateText = bt + mateText;
-      bt = text.charAt(--bos);
+    isFieldSourceStr = !!fieldText;
+    if (isFieldSourceStr) {
+      sourceStr = fieldText;
+    } else {
+      let mateText = "";
+      const blackList = ['"', "'", ":", " "];
+      let pos = position.character;
+      let pt = text.charAt(pos);
+      while (!blackList.includes(pt) && pos < text.length) {
+        mateText += pt;
+        pt = text.charAt(++pos);
+      }
+      let bos = position.character - 1;
+      let bt = text.charAt(bos);
+      while (!blackList.includes(bt) && bos >= 0) {
+        mateText = bt + mateText;
+        bt = text.charAt(--bos);
+      }
+      if (reg.test(mateText)) {
+        sourceStr = mateText;
+      }
     }
-    const sourceStr = reg.test(mateText) && mateText;
-    const sourceStrLineNumber = lineText.lineNumber;
+    /**
+     * 1. 拓宽sourceStr的判断入口
+     * 2. 记录每个ColumnList项的起始与结束行号，存在数组中。
+     * 3. 根据soucrStr判断是要跳ColumnList上还是它之间的内容；如果是后者，做好与sourceStr匹配的行对象和行号记录，存在数组中。
+     * 4. 遍历结束后，根据2的数组判断sourceStr是不是正确来源于strFun，如不是结束。如是，3的数组元素作为跳转对象的组成参数进行跳转。
+     */
     if (sourceStr) {
       let pos = 0;
       let flagStr = "";
@@ -59,6 +82,10 @@ export class MyDefinitionProvider implements DefinitionProvider {
         renderList: [],
       };
       let braceLeftCount = 0;
+      const breakReg = /^[^\S\r\n\w]*break.*$/g;
+      const columnStrLineNumberObj: Record<string, number[][]> = {};
+      let columnStrFlag = "";
+      const fieldSourceStrObj: Record<number, [number, string, TextLine]> = {};
       while (pos <= document.lineCount) {
         const lineItem = document.lineAt(pos++);
         const lineItemText = lineItem.text;
@@ -100,7 +127,39 @@ export class MyDefinitionProvider implements DefinitionProvider {
               (sourceStr.substring(0, sourceStr.indexOf("ColumnList")) ||
                 sourceStr.substring(0, sourceStr.indexOf("RenderList"))) ===
                 mateStr.substring(0, mateStr.indexOf("ColumnList"));
-            if (mateStr && isEqul) {
+            if (isFieldSourceStr) {
+              // 记录column的行号
+              if (mateStr) {
+                columnStrFlag = mateStr;
+                if (columnStrFlag in columnStrLineNumberObj) {
+                  columnStrLineNumberObj[columnStrFlag].push([
+                    lineItem.lineNumber,
+                  ]);
+                } else {
+                  columnStrLineNumberObj[columnStrFlag] = [[]];
+                  columnStrLineNumberObj[columnStrFlag][0][0] =
+                    lineItem.lineNumber;
+                }
+              }
+              if (breakReg.test(lineItemText) && columnStrFlag) {
+                columnStrLineNumberObj[columnStrFlag][
+                  columnStrLineNumberObj[columnStrFlag].length - 1
+                ][1] = lineItem.lineNumber;
+                columnStrFlag = "";
+              }
+              // 记录field的行信息
+              if (
+                lineItem.lineNumber !== sourceStrLineNumber &&
+                (sourceStr === lineItemText.replace(fieldReg, "$1") ||
+                  sourceStr === lineItemText.replace(renderReg, "$1"))
+              ) {
+                fieldSourceStrObj[lineItem.lineNumber] = [
+                  lineItem.lineNumber,
+                  sourceStr,
+                  lineItem,
+                ];
+              }
+            } else if (mateStr && isEqul) {
               // 跳转分为非常规逻辑和常规跳转。
               // 非常规逻辑：在getDefaultTableColumnList和getTableRenderList的方法内的列定制字段名(case 'fieldName':)按下跳转按键（F12或ctrl+左键）。
               // 记录当前行对象mateObjByInStrFunedSourceStr、行匹配文本mateStrByInStrFunedSourceStr后续使用。
@@ -148,21 +207,83 @@ export class MyDefinitionProvider implements DefinitionProvider {
         // sourceStrLineNumber处于flagStr方法的行号中，进行非常规跳转。
         // 非常规跳转解释：即在getDefaultTableColumnList或getTableRenderList的方法中按下跳转按键，会寻找这两方法中相同的列定制字段名进行来回跳转。
         if (
-          mateObjByInStrFunedSourceStr &&
+          (mateObjByInStrFunedSourceStr || isFieldSourceStr) &&
           ((columnListStartIndex < sourceStrLineNumber &&
             sourceStrLineNumber < columnListEndIndex) ||
             (renderListStartIndex < sourceStrLineNumber &&
               sourceStrLineNumber < renderListEndIndex))
         ) {
-          return new Location(
-            document.uri,
-            new Position(
-              mateObjByInStrFunedSourceStr.lineNumber,
-              mateObjByInStrFunedSourceStr.text.indexOf(
-                mateStrByInStrFunedSourceStr
-              ) + mateStrByInStrFunedSourceStr.length
-            )
-          );
+          // 字段跳转
+          if (isFieldSourceStr) {
+            if (Object.keys(columnStrLineNumberObj).length > 0) {
+              let flagStr = "";
+              for (const key in columnStrLineNumberObj) {
+                if (
+                  Object.prototype.hasOwnProperty.call(
+                    columnStrLineNumberObj,
+                    key
+                  )
+                ) {
+                  const valueList = columnStrLineNumberObj[key];
+                  valueList.forEach(([startLineNumber, endLineNumber]) => {
+                    if (
+                      startLineNumber < sourceStrLineNumber &&
+                      sourceStrLineNumber < endLineNumber
+                    ) {
+                      flagStr = key;
+                    }
+                  });
+                }
+                if (flagStr) {
+                  break;
+                }
+              }
+              if (flagStr) {
+                let logList: [number, string, TextLine][] = [];
+                for (const key in fieldSourceStrObj) {
+                  if (
+                    Object.prototype.hasOwnProperty.call(fieldSourceStrObj, key)
+                  ) {
+                    const valueList = fieldSourceStrObj[key];
+                    let isHas = false;
+                    columnStrLineNumberObj[flagStr].forEach(
+                      ([startLineNumber, endLineNumber]) => {
+                        if (startLineNumber < +key && +key < endLineNumber) {
+                          if (!isHas) {
+                            isHas = true;
+                            logList.push(valueList);
+                          }
+                        }
+                      }
+                    );
+                  }
+                }
+                if (logList.length > 0) {
+                  return logList.map(
+                    ([lineNumber, mateStr, lineTextObj]) =>
+                      new Location(
+                        document.uri,
+                        new Position(
+                          lineNumber,
+                          lineTextObj.text.indexOf(mateStr) + mateStr.length
+                        )
+                      )
+                  );
+                }
+              }
+            }
+            return null;
+          } else if (mateObjByInStrFunedSourceStr) {
+            return new Location(
+              document.uri,
+              new Position(
+                mateObjByInStrFunedSourceStr.lineNumber,
+                mateObjByInStrFunedSourceStr.text.indexOf(
+                  mateStrByInStrFunedSourceStr
+                ) + mateStrByInStrFunedSourceStr.length
+              )
+            );
+          }
         } else if (mateObjByOutStrFunedSourceStr) {
           // sourceStrLineNumber不处于flagStr方法的行号中，进行常规跳转。
           // 常规跳转解释：即在getDefaultTableColumnList或getTableRenderList的方法外按下跳转按键，
