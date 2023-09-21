@@ -215,6 +215,7 @@ export class MyDefinitionProvider implements DefinitionProvider {
         // 字段跳转解释：在XXXColumnList中存在两种字段格式：operation: { 和 field: 'operation' 如果在它们之一进行F12的跳转称之为字段跳转；它会跳转到除了自身外并存在XXXColumnList中的字段行。
         if (
           (mateObjByInStrFunedSourceStr || isFieldSourceStr) &&
+          (mateObjByInStrFunedSourceStr || isFieldSourceStr) &&
           ((columnListStartIndex < sourceStrLineNumber &&
             sourceStrLineNumber < columnListEndIndex) ||
             (renderListStartIndex < sourceStrLineNumber &&
